@@ -5,28 +5,24 @@ import torch.nn.functional as F
 from fastkan import FastKANLayer, AttentionWithFastKANTransform
 from datasets import load_dataset
 
-# text = load_dataset("afmck/text8-chunked1024")
-# %%
 # hyperparameters
 batch_size = 16 # context length
 n_head = 8 # number of heads in each block
 n_embd = 40 # embedding dimension
-# n_head = 10 # number of heads in each block
-# n_embd = 50 # embedding dimension
-# ~added later~
+n_layer = 4 # number of blocks to use
 block_size = 32 # how many independent seq in parallel?
 max_iters = 1000
 eval_interval = 100
 eval_iters = 200
 learning_rate = 1e-3
-n_layer = 4 # number of blocks to use
-# n_layer = 5 # number of blocks to use
 dropout = 0.0 # portion of neurons to turn off
 
 # %%
 # read file
-with open('../input.txt', 'r') as f:
-    text = f.read()
+# with open('../input.txt', 'r') as f:
+#     text = f.read()
+
+text = load_dataset("afmck/text8-chunked1024")['test']
 
 # %%
 # gpu stuff
@@ -81,45 +77,6 @@ def estimate_loss():
     model.train()
     return out
 
-# %%
-class Head(nn.Module):
-    """ one head of self-attention """
-
-    def __init__(self, head_size):
-        super().__init__()
-        self.query = nn.Linear(n_embd, head_size, bias=False)
-        self.key = nn.Linear(n_embd, head_size, bias=False)
-        self.value = nn.Linear(n_embd, head_size, bias=False)
-
-        self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size)))
-
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, x):
-        B,T,C = x.shape # MODIFIED: this is an attribute and not module
-        q,k,v = self.query(x), self.key(x), self.value(x)
-
-        wei = (q @ k.transpose(-2, -1)) * (C ** -0.5)
-        wei = wei.masked_fill(self.tril[:T, :T] == 0, float('-inf')) # MODIFIED: (B, T, T); :T ensures that the mask accounts for the fact that there can be less than max number of elems in time dimension
-        wei = F.softmax(wei, dim=-1)
-        wei = self.dropout(wei)
-
-        out = wei @ v
-
-        return out
-
-class MultiHeadedAttention(nn.Module):
-    def __init__(self, num_heads, head_size):
-        super().__init__()
-        self.heads = nn.ModuleList([Head(head_size) for _ in range(num_heads)])
-        self.proj = nn.Linear(n_embd, n_embd) # ???
-        # self.proj = FastKANLayer(n_embd, n_embd)
-        self.dropout = nn.Dropout(dropout)
-    def forward(self, x):
-        out = torch.cat([h(x) for h in self.heads], dim=-1)
-        out = self.dropout(self.proj(out))
-        return out
-
 class FeedForward(nn.Module):
     def __init__(self, n_embd) -> None:
         super().__init__()
@@ -136,20 +93,26 @@ class Block(nn.Module):
     def __init__(self, n_embd, n_head):
         super().__init__()
         head_size = n_embd // n_head # ??? n_embd used in multi headed attention as well whereas
-        self.sa = MultiHeadedAttention(n_head, head_size)
-        # self.sa = AttentionWithFastKANTransform(
-        #     q_dim=n_embd,
-        #     k_dim=n_embd,
-        #     v_dim=n_embd,
-        #     head_dim=head_size,
-        #     num_heads=n_head,
-        #     gating=True  # You can experiment with this parameter
-        # )
+        # self.sa = MultiHeadedAttention(n_head, head_size)
+        self.sa = AttentionWithFastKANTransform(
+            q_dim=n_embd,
+            k_dim=n_embd,
+            v_dim=n_embd,
+            head_dim=head_size,
+            num_heads=n_head,
+            gating=True  # You can experiment with this parameter
+        )
         self.ffwd = FeedForward(n_embd)
         self.ln1 = nn.LayerNorm(n_embd)
         self.ln2 = nn.LayerNorm(n_embd)
+        self.q = nn.Linear(n_embd, n_embd)
+        self.k = nn.Linear(n_embd, n_embd)
+        self.v = nn.Linear(n_embd, n_embd)
     def forward(self, x):
-        x = x + self.sa(self.ln1(x))
+        q = self.q(x)
+        k = self.k(x)
+        v = self.v(x)
+        x = x + self.sa(self.ln1(q), self.ln1(k), self.ln1(v))
         x = x + self.ffwd(self.ln2(x))
         return x
 
@@ -193,13 +156,6 @@ class BigramLanguageModel(nn.Module):
             idx = torch.concat([idx, idx_next], dim=1)
         
         return idx
-    
-    # def get_regularization_loss(self, regularize_activation=1.0, regularize_entropy=1.0):
-    #     reg_loss = 0
-    #     for module in self.modules():
-    #         if isinstance(module, KANLinear):
-    #             reg_loss += module.regularization_loss(regularize_activation, regularize_entropy)
-    #     return reg_loss
 
 # %%
 model = BigramLanguageModel()
@@ -225,5 +181,3 @@ for iter in range(max_iters):
 # %%
 context = torch.zeros((1,1), dtype=torch.long, device=device)
 print(decode(m.generate(context, max_new_tokens=200)[0].tolist()))
-
-
