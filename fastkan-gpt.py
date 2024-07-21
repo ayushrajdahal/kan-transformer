@@ -19,7 +19,9 @@ dropout = 0.0        # Dropout rate (0.0 means no dropout)
 
 # %%
 # Load dataset
-text = load_dataset("afmck/text8-chunked1024")['test']
+# text = load_dataset("afmck/text8-chunked1024")['test']
+with open('input.txt', 'r') as f:
+    text = f.read()
 
 # %%
 # Set up device (CPU, CUDA, or MPS)

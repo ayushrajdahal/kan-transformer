@@ -49,7 +49,7 @@ The model consists of the following components:
 
 ## Data
 
-The model uses the "afmck/text8-chunked1024" dataset from Hugging Face's datasets library. You can modify the script to use a different dataset if needed.
+The model uses tiny shakespeare dataset, a collection of approximately 40,000 lines of text from various works by William Shakespeare. You can modify the script to use a different dataset if needed.
 
 ## Output
 
